@@ -8,6 +8,23 @@ const https = require('https');
 const cors = require('cors');
 const fs = require('fs');
 
+const redis = require('redis');
+
+var redisClient = redis.createClient(6379, '127.0.0.1');
+
+redisClient.on('error', (err) => console.log('Redis Client Error', err));
+
+const connectToRedis = async client => {
+    await client.connect();
+
+    await client.set('greeting', 'hello world from redis');
+    const value = await client.get('greeting');
+
+    console.log(value);
+}
+
+connectToRedis(redisClient);
+
 const app = express();
 app.use(express.static('public'));
 app.use(express.json({limit: '200mb'})); 
@@ -34,12 +51,18 @@ const wss = new ws.WebSocketServer({ server });
 
 wss.on('connection', function connection(ws, req) {
     console.log('connection');
-    ws.on('message', function message(data) {
-      console.log('%s: %s', todaysLocalDateAsYyyyMmDd(), data);
+    ws.on('message', function message(info) {
+
+      let data = JSON.parse(info);
+      
+      let key = `${todaysLocalDateAsYyyyMmDd()}|${data.uuid}|${data.ip}|${data.host}|${data.path}|${data.query}`;
+      let incVal = data.ts;
+
+      console.log(key, incVal)
       
     });
   
-    ws.send('something');
+    //ws.send('something');
   });
   
 server.listen(listenPort);
