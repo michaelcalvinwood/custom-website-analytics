@@ -10,13 +10,15 @@ const fs = require('fs');
 
 const redis = require('redis');
 
-var redisClient = redis.createClient(6379, '127.0.0.1');
+const redisClient = redis.createClient(6379, '127.0.0.1');
+let redisConnected = false;
+
 
 redisClient.on('error', (err) => console.log('Redis Client Error', err));
 
 const connectToRedis = async client => {
     await client.connect();
-
+    redisConnected = true;
     await client.set('greeting', 'hello world from redis');
     const value = await client.get('greeting');
 
@@ -57,6 +59,10 @@ wss.on('connection', function connection(ws, req) {
       
       let key = `${todaysLocalDateAsYyyyMmDd()}|${data.uuid}|${data.ip}|${data.host}|${data.path}|${data.query}`;
       let incVal = data.ts;
+
+      if (redisConnected) {
+        redisClient.INCRBY(key, incVal);
+      }
 
       console.log(key, incVal)
       
