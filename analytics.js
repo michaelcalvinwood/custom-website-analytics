@@ -51,52 +51,60 @@ const server = https.createServer({
   
 const wss = new ws.WebSocketServer({ server });
 
-const processMessage = (info) => {
-  return new Promise (async (resolve, reject) => {
+const processMessage = async (info, ws) => {
+  //return new Promise (async (resolve, reject) => {
+    console.log(JSON.stringify(wss.clients, null, 4));
+
     let data = JSON.parse(info);
       
-    if (typeof data.type === undefined) resolve('missing type');
+    if (typeof data.type === undefined) return;
 
-    if (!redisConnected) resolve('redis not connected');
+    if (!redisConnected) return;
 
     let currentDate, key, incVal;
 
     switch (data.type) {
       case 'pageVisit':
+          ws.uuid = data.uuid;
           currentDate = todaysLocalDateAsYyyyMmDd();
           key = `${currentDate}|${data.uuid}|${data.ip}|${data.host}|${data.path}|${data.query}`;
           incVal = data.ts;
-          redisClient.INCRBY(key, incVal);
+          await redisClient.INCRBY(key, incVal);
           console.log(key, incVal);
           
           key = `${currentDate}|${data.path}`;
           incVal = 1;
-          redisClient.INCRBY(key, 1);
+          await redisClient.INCRBY(key, 1);
           console.log(key, incVal);
-          
-          resolve(incVal);
+
+          return;
         break;
       case 'pageStay':
           currentDate = todaysLocalDateAsYyyyMmDd();
           key = `${currentDate}|${data.uuid}|${data.ip}|${data.host}|${data.path}|${data.query}`;
           incVal = data.ts;
-          redisClient.INCRBY(key, incVal);
+          await redisClient.INCRBY(key, incVal);
           console.log(key, incVal);
           
-          resolve(incVal);
+          return;
         break;
       default:
           console.error(`unknown type: ${data.type}`)
-          resolve(`unknown type: ${data.type}`);
+          return;
     }
-  })
+  //})
 }
 
-wss.on('connection', function connection(ws, req) {
-    console.log('connection');
+wss.on('connection', (ws, req) => {
+    console.log('connection', wss.clients.size);
+    
     ws.on('message', function message(info) {
-      processMessage(info);
+      processMessage(info, ws);
     });
+
+    ws.on('close', () => {
+      console.log('closed connection', ws.uuid, wss.clients.size);
+    })
   });
   
 server.listen(listenPort);
