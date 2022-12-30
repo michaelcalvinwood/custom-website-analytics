@@ -51,24 +51,39 @@ const server = https.createServer({
 
 const wss = new ws.WebSocketServer({ server });
 
+const processMessage = (info) => {
+  return new Promise ((resolve, reject) => {
+    let data = JSON.parse(info);
+      
+    if (typeof data.type === undefined) reject('missing type');
+
+    switch (data.type) {
+      case 'pageVisit':
+          let key = `${todaysLocalDateAsYyyyMmDd()}|${data.uuid}|${data.ip}|${data.host}|${data.path}|${data.query}`;
+          let incVal = data.ts;
+    
+          if (redisConnected) {
+            redisClient.INCRBY(key, incVal);
+          }
+    
+          console.log(key, incVal)
+          resolve(incVal);
+        break;
+      default:
+          console.error(`unknown type: ${data.type}`)
+          reject(`unknown type: ${data.type}`);
+    }
+
+
+
+  })
+}
+
 wss.on('connection', function connection(ws, req) {
     console.log('connection');
     ws.on('message', function message(info) {
-
-      let data = JSON.parse(info);
-      
-      let key = `${todaysLocalDateAsYyyyMmDd()}|${data.uuid}|${data.ip}|${data.host}|${data.path}|${data.query}`;
-      let incVal = data.ts;
-
-      if (redisConnected) {
-        redisClient.INCRBY(key, incVal);
-      }
-
-      console.log(key, incVal)
-      
+      processMessage(info);
     });
-  
-    //ws.send('something');
   });
   
 server.listen(listenPort);
