@@ -13,7 +13,6 @@ const redis = require('redis');
 const redisClient = redis.createClient(6379, '127.0.0.1');
 let redisConnected = false;
 
-
 redisClient.on('error', (err) => console.log('Redis Client Error', err));
 
 const connectToRedis = async client => {
@@ -39,6 +38,8 @@ const todaysLocalDateAsYyyyMmDd = () => {
   return yourDate.toISOString().split('T')[0]
 }
 
+let todaysDate = todaysLocalDateAsYyyyMmDd();
+
 app.get('/', (req, res) => {
     res.send('Hello, World!');
 });
@@ -48,34 +49,46 @@ const server = https.createServer({
     cert: fs.readFileSync(fullchainPath),
   }, app);
   
-
 const wss = new ws.WebSocketServer({ server });
 
 const processMessage = (info) => {
-  return new Promise ((resolve, reject) => {
+  return new Promise (async (resolve, reject) => {
     let data = JSON.parse(info);
       
-    if (typeof data.type === undefined) reject('missing type');
+    if (typeof data.type === undefined) resolve('missing type');
+
+    if (!redisConnected) resolve('redis not connected');
+
+    let currentDate, key, incVal;
 
     switch (data.type) {
       case 'pageVisit':
-          let key = `${todaysLocalDateAsYyyyMmDd()}|${data.uuid}|${data.ip}|${data.host}|${data.path}|${data.query}`;
-          let incVal = data.ts;
-    
-          if (redisConnected) {
-            redisClient.INCRBY(key, incVal);
-          }
-    
-          console.log(key, incVal)
+          currentDate = todaysLocalDateAsYyyyMmDd();
+          key = `${currentDate}|${data.uuid}|${data.ip}|${data.host}|${data.path}|${data.query}`;
+          incVal = data.ts;
+          redisClient.INCRBY(key, incVal);
+          console.log(key, incVal);
+          
+          key = `${currentDate}|${data.path}`;
+          incVal = 1;
+          redisClient.INCRBY(key, 1);
+          console.log(key, incVal);
+          
+          resolve(incVal);
+        break;
+      case 'pageStay':
+          currentDate = todaysLocalDateAsYyyyMmDd();
+          key = `${currentDate}|${data.uuid}|${data.ip}|${data.host}|${data.path}|${data.query}`;
+          incVal = data.ts;
+          redisClient.INCRBY(key, incVal);
+          console.log(key, incVal);
+          
           resolve(incVal);
         break;
       default:
           console.error(`unknown type: ${data.type}`)
-          reject(`unknown type: ${data.type}`);
+          resolve(`unknown type: ${data.type}`);
     }
-
-
-
   })
 }
 
