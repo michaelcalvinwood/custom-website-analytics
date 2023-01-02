@@ -74,10 +74,10 @@ const handleSubscriptions = async url => {
   info.url = url;
 
   currentDate = todaysLocalDateAsYyyyMmDd();
-  let key = `${currentDate}|${url}|uniquePageViewers`;
+  let key = `${currentDate}|uniquePageViewers|${url}`;
   info.uniquePageViewers = await redisClient.get(key);
 
-  key = `${currentDate}|${url}|timeOnPage`;
+  key = `${currentDate}|timeOnPage|${url}`;
   info.timeOnPage = await redisClient.get(key);
 
   subscriptions[url].forEach(uuid => {
@@ -113,33 +113,35 @@ const processMessage = async (info, ws) => {
         ws.uuid = data.uuid;
         ws.url = url;
         
-        let value;
-
         key = `${currentDate}|referrer|${url}|${data.referrer}`;
-        value = await redisClient.INCRBY(key, 1);
-        console.log(key, value);
-        
+        await redisClient.INCRBY(key, 1);
 
         key = `${currentDate}|timeOnPage|${url}`;
-        incVal = data.ts;
-        value = await redisClient.INCRBY(key, incVal);
-        console.log(key, value);
+        await redisClient.INCRBY(key, data.ts);
         
         key = `${currentDate}|pageViews|${url}`;
-        incVal = 1;
-        totalPageViews = await redisClient.INCRBY(key, 1);
-        console.log(key, totalPageViews);
-
-        key = `${currentDate}|viewers|${url}`;
+        await redisClient.INCRBY(key, 1);
+      
+        key = `${currentDate}|pageViewers|${url}`;
         result = await redisClient.SADD(key, data.uuid);
 
         if (result) {
-          key = `${currentDate}|${url}|uniquePageViewers`;
-          incVal = 1;
-          uniquePageViews = await redisClient.INCRBY(key, 1);
-          console.log(key, uniquePageViews);
+          key = `${currentDate}|uniquePageViewers|${url}`;
+          await redisClient.INCRBY(key, 1);
+      
+          key = `${currentDate}|uniquePageViews|${data.host}`;
+          await redisClient.INCRBY(key, 1);
         }
 
+        key = `${currentDate}|siteViews|${data.host}`;
+        await redisClient.INCRBY(key, 1);
+      
+        key = `${currentDate}|siteViewers|${data.host}`;
+        await redisClient.SADD(key, data.uuid);
+
+        key = `${currentDate}|timeOnSite|${data.host}`;
+        await redisClient.INCRBY(key, data.ts);
+      
         subscribe(data.uuid, url, ws);
 
         handleSubscriptions(url);
@@ -149,10 +151,12 @@ const processMessage = async (info, ws) => {
         currentDate = todaysLocalDateAsYyyyMmDd();
         url = data.host + data.path;
 
-        key = `${currentDate}|${url}|timeOnPage`;
-        incVal = data.ts;
-        timeOnPage = await redisClient.INCRBY(key, incVal);
-        
+        key = `${currentDate}|timeOnPage|${url}`;
+        timeOnPage = await redisClient.INCRBY(key, data.ts);
+
+        key = `${currentDate}|timeOnSite|${data.host}`;
+        await redisClient.INCRBY(key, data.ts);
+
         handleSubscriptions(url);
         return;
       break;
