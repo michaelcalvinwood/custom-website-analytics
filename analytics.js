@@ -107,29 +107,37 @@ const processMessage = async (info, ws) => {
 
   switch (data.type) {
     case 'pageVisit':
-      url = data.host + data.path;
+        currentDate = todaysLocalDateAsYyyyMmDd();
+      
+        url = data.host + data.path;
         ws.uuid = data.uuid;
         ws.url = url;
         
-        currentDate = todaysLocalDateAsYyyyMmDd();
-        key = `${currentDate}|${url}|timeOnPage`;
-        incVal = data.ts;
-        await redisClient.INCRBY(key, incVal);
-        console.log(key, incVal);
+        let value;
+
+        key = `${currentDate}|referrer|${url}|${data.referrer}`;
+        value = await redisClient.INCRBY(key, 1);
+        console.log(key, value);
         
-        key = `${currentDate}|${url}|pageViews`;
+
+        key = `${currentDate}|timeOnPage|${url}`;
+        incVal = data.ts;
+        value = await redisClient.INCRBY(key, incVal);
+        console.log(key, value);
+        
+        key = `${currentDate}|pageViews|${url}`;
         incVal = 1;
         totalPageViews = await redisClient.INCRBY(key, 1);
-        console.log(key, incVal);
+        console.log(key, totalPageViews);
 
-        key = `${currentDate}|${url}|viewers`;
+        key = `${currentDate}|viewers|${url}`;
         result = await redisClient.SADD(key, data.uuid);
 
         if (result) {
           key = `${currentDate}|${url}|uniquePageViewers`;
           incVal = 1;
           uniquePageViews = await redisClient.INCRBY(key, 1);
-          console.log(key, incVal);
+          console.log(key, uniquePageViews);
         }
 
         subscribe(data.uuid, url, ws);
