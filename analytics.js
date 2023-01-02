@@ -55,10 +55,6 @@ let urlSet = {};
 let subscriptions = {};
 let connections = {};
 
-const setConnection = (uuid, ws) => {
-  if (typeof connections[uuid] === 'undefined') connections[uuid] = ws;
-}
-
 const urlSubscribe = (uuid, url) => {
   console.log(`urlSubscribe: ${uuid} to ${url}`);
 
@@ -66,14 +62,18 @@ const urlSubscribe = (uuid, url) => {
 }
 
 const handleSubscriptions = async () => {
+  console.log('handleSubscriptions');
+
   let key;
   currentDate = todaysLocalDateAsYyyyMmDd();
-  
-  subscriptions.forEach(async uuid => {
+
+  let uuids = Object.keys(subscriptions);
+  console.log('uuids', uuids);
+
+  uuids.forEach(async uuid => {
     let info = {};
     info.type = 'urlInfo';
-    info.urls = [];
-
+    
     let host = subscriptions[uuid].host;
     
     key = `${currentDate}|uniqueSiteViewers|${host}`;
@@ -86,7 +86,12 @@ const handleSubscriptions = async () => {
       host, uniqueSiteViewers, timeOnSite
     }
 
-    subscriptions[uuid].urls.forEach(async url => {
+    info.urls = [];
+    const urls = [...subscriptions[uuid].urls];
+    
+    for (let i = 0; i < urls.length; ++i) {
+      let url = urls[i];
+      console.log('forEach url', url);
       key = `${currentDate}|uniquePageViewers|${url}`;
       let uniquePageViewers = await redisClient.get(key);
     
@@ -94,15 +99,16 @@ const handleSubscriptions = async () => {
       let timeOnPage = await redisClient.get(key);
   
       info.urls.push({
-        url, uniqueageViews, timeOnPage
+        url, uniquePageViewers, timeOnPage
       })
-    })
+    }
+   
+    
+    subscriptions[uuid].connection.send(JSON.stringify(info));
   })
-
-
-  connections[uuid].send(JSON.stringify(info));
-
 }
+
+setInterval(handleSubscriptions, 5000);
 
 const unsubscribeAll = (uuid) => {
 
@@ -113,6 +119,8 @@ const unsubscribeAll = (uuid) => {
 
 const processMessage = async (info, ws) => {
   let data = JSON.parse(info);
+  console.log(data);
+
     
   if (typeof data.type === undefined) return;
 
@@ -120,10 +128,10 @@ const processMessage = async (info, ws) => {
 
   let currentDate, key, incVal,result, totalPageViews, uniquePageViews, timeOnPage, url;
 
-  switch (data.type) {
-    case 'pageVisit':
-        currentDate = todaysLocalDateAsYyyyMmDd();
+  currentDate = todaysLocalDateAsYyyyMmDd();
       
+  switch (data.type) {
+    case 'pageVisit':  
         url = data.host + data.path;
         ws.uuid = data.uuid;
         ws.url = url;
@@ -160,22 +168,21 @@ const processMessage = async (info, ws) => {
         }
 
         if (data.isSubscriber) {
-          if (typeof subscriptions[uuid] === 'undefined') {
+          if (typeof subscriptions[data.uuid] === 'undefined') {
           
-            subscriptions[uuid] = {};
-            subscriptions[uuid].urls = new Set();
-            subscriptions[uuid].host = data.host;
-            subscriptions[uuid].connection = ws;
+            subscriptions[data.uuid] = {};
+            subscriptions[data.uuid].urls = new Set();
+            subscriptions[data.uuid].host = data.host;
+            subscriptions[data.uuid].connection = ws;
           }
 
           urlSubscribe(data.uuid, url);
   
-          //handleSubscriptions(url, data.host);
+          handleSubscriptions();
         } else console.log(`${data.uuid} is not a subscriber`);
         return;
       break;
     case 'pageStay':
-        currentDate = todaysLocalDateAsYyyyMmDd();
         url = data.host + data.path;
 
         key = `${currentDate}|timeOnPage|${url}`;
@@ -183,10 +190,13 @@ const processMessage = async (info, ws) => {
 
         key = `${currentDate}|timeOnSite|${data.host}`;
         await redisClient.INCRBY(key, data.ts);
-
-        //if (data.isSubscriber) handleSubscriptions(url, data.host);
         return;
       break;
+    case 'urlSubscribe':
+        const {host, path, uuid} = data;
+
+        urlSubscribe(uuid, host + path);
+        break;
     default:
         console.error(`unknown type: ${data.type}`)
         return;
