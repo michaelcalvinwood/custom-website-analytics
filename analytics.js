@@ -51,10 +51,9 @@ const server = https.createServer({
   
 const wss = new ws.WebSocketServer({ server });
 
-const urlSet = {};
-const urlSubscriptions = {};
-const hostSubscriptions = {};
-const connections = {};
+let urlSet = {};
+let subscriptions = {};
+let connections = {};
 
 const setConnection = (uuid, ws) => {
   if (typeof connections[uuid] === 'undefined') connections[uuid] = ws;
@@ -63,59 +62,51 @@ const setConnection = (uuid, ws) => {
 const urlSubscribe = (uuid, url) => {
   console.log(`urlSubscribe: ${uuid} to ${url}`);
 
-  if (typeof urlSubscriptions[url] === 'undefined') urlSubscriptions[url] = new Set();
-  urlSubscriptions[url].add(uuid);
- 
-  if (typeof urlSubscriptions[uuid] === 'undefined') urlSubscriptions[uuid] = new Set();
-  urlSubscriptions[uuid].add(url);
+  subscriptions[uuid].urls.add(url);
 }
 
-const hostSubscribe = (uuid, host) => {
-  console.log(`hostSubscribe: ${uuid} to ${host}`);
-
-  if (typeof hostSubscriptions[host] === 'undefined') hostSubscriptions[host] = new Set();
-  hostSubscriptions[host].add(uuid);
- 
-  // you can only be subscribed to one host at a time
-  hostSubscriptions[uuid] = host;
-}
-
-const handleSubscriptions = async (url, host) => {
-  if (typeof urlSubscriptions[url] === 'undefined') return;
-  let info = {};
-  info.type = 'urlInfo';
-  info.url = url;
-
+const handleSubscriptions = async () => {
+  let key;
   currentDate = todaysLocalDateAsYyyyMmDd();
+  
+  subscriptions.forEach(async uuid => {
+    let info = {};
+    info.type = 'urlInfo';
+    info.urls = [];
 
-  let key = `${currentDate}|uniquePageViewers|${url}`;
-  info.uniquePageViewers = await redisClient.get(key);
+    let host = subscriptions[uuid].host;
+    
+    key = `${currentDate}|uniqueSiteViewers|${host}`;
+    let uniqueSiteViewers = await redisClient.get(key);
+  
+    key = `${currentDate}|timeOnSite|${host}`;
+    let timeOnSite = await redisClient.get(key);
+  
+    info.host = {
+      host, uniqueSiteViewers, timeOnSite
+    }
 
-  key = `${currentDate}|timeOnPage|${url}`;
-  info.timeOnPage = await redisClient.get(key);
-
-  key = `${currentDate}|uniqueSiteViewers|${host}`;
-  info.uniqueSiteViewers = await redisClient.get(key);
-
-  key = `${currentDate}|timeOnSite|${host}`;
-  info.timeOnSite = await redisClient.get(key);
-
-  urlSubscriptions[url].forEach(uuid => {
-    connections[uuid].send(JSON.stringify(info));
+    subscriptions[uuid].urls.forEach(async url => {
+      key = `${currentDate}|uniquePageViewers|${url}`;
+      let uniquePageViewers = await redisClient.get(key);
+    
+      key = `${currentDate}|timeOnPage|${url}`;
+      let timeOnPage = await redisClient.get(key);
+  
+      info.urls.push({
+        url, uniqueageViews, timeOnPage
+      })
+    })
   })
+
+
+  connections[uuid].send(JSON.stringify(info));
+
 }
 
 const unsubscribeAll = (uuid) => {
-  if (typeof connections[uuid] !== 'undefined') delete connections[uuid];
 
-  if (typeof urlSubscriptions[uuid] !== 'undefined') {
-    urlSubscriptions[uuid].forEach(url => urlSubscriptions[url].delete(uuid));
-    delete urlSubscriptions[uuid];
-  }
-
-  if (typeof hostSubscriptions[uuid] !== 'undefined') {
-    delete hostSubscriptions[uuid];
-  }
+  delete subscriptions[uuid];
 
   console.log(`unsubscribe: ${uuid} from all`);
 }
@@ -169,11 +160,17 @@ const processMessage = async (info, ws) => {
         }
 
         if (data.isSubscriber) {
-          setConnection(data.uuid, ws);
+          if (typeof subscriptions[uuid] === 'undefined') {
+          
+            subscriptions[uuid] = {};
+            subscriptions[uuid].urls = new Set();
+            subscriptions[uuid].host = data.host;
+            subscriptions[uuid].connection = ws;
+          }
+
           urlSubscribe(data.uuid, url);
-          hostSubscribe(data.uuid, data.host);
   
-          handleSubscriptions(url, data.host);
+          //handleSubscriptions(url, data.host);
         } else console.log(`${data.uuid} is not a subscriber`);
         return;
       break;
@@ -187,7 +184,7 @@ const processMessage = async (info, ws) => {
         key = `${currentDate}|timeOnSite|${data.host}`;
         await redisClient.INCRBY(key, data.ts);
 
-        if (data.isSubscriber) handleSubscriptions(url, data.host);
+        //if (data.isSubscriber) handleSubscriptions(url, data.host);
         return;
       break;
     default:
