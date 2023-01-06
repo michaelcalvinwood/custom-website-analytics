@@ -55,21 +55,20 @@ let urlSet = {};
 let subscriptions = {};
 let connections = {};
 
-const urlSubscribe = (uuid, url) => {
-  console.log(`urlSubscribe: ${uuid} to ${url}`);
+const sendInfoToUuid = (uuid, info) => {
+  subscriptions[uuid].connection.send(JSON.stringify(info));
+}
 
+const urlSubscribe = (uuid, url) => {
   subscriptions[uuid].urls.add(url);
 }
 
 const handleSubscriptions = async () => {
-  console.log('handleSubscriptions');
-
   let key;
   currentDate = todaysLocalDateAsYyyyMmDd();
 
   let uuids = Object.keys(subscriptions);
-  console.log('uuids', uuids);
-
+  
   uuids.forEach(async uuid => {
     let info = {};
     info.type = 'urlInfo';
@@ -91,7 +90,6 @@ const handleSubscriptions = async () => {
     
     for (let i = 0; i < urls.length; ++i) {
       let url = urls[i];
-      console.log('forEach url', url);
       key = `${currentDate}|uniquePageViewers|${url}`;
       let uniquePageViewers = await redisClient.get(key);
     
@@ -103,7 +101,6 @@ const handleSubscriptions = async () => {
       })
     }
    
-    
     subscriptions[uuid].connection.send(JSON.stringify(info));
   })
 }
@@ -117,10 +114,94 @@ const unsubscribeAll = (uuid) => {
   console.log(`unsubscribe: ${uuid} from all`);
 }
 
+async function scanAsync(cursor, pattern, results) {
+  return redis.scanAsync(cursor, 'MATCH', pattern, 'COUNT', '10')
+      .then(function(reply) {
+
+          let keys = reply[1]
+          keys.forEach(function(key) {
+              results.push(key)
+          })
+
+          cursor = reply[0]
+          if(cursor === '0') {
+              console.log('Scan complete')
+          } else {
+              return scanAsync(cursor, pattern, results)
+          }
+      })
+}
+
+const getReferrers = async (uuid, url) => {
+  currentDate = todaysLocalDateAsYyyyMmDd();
+  let cursor = '0';
+  let MATCH = `${currentDate}|referrer|${url}|`;
+  let referrers = new Set();
+
+  console.log('getReferrers', MATCH);
+
+  await redisClient.scan(0, 'MATCH', MATCH).then((keys) => {
+    console.log(JSON.stringify(keys));
+  });
+}
+
+const processPageVisit = async (data, ws) => {
+  let currentDate, key, incVal,result, totalPageViews, uniquePageViews, timeOnPage, url;
+
+  currentDate = todaysLocalDateAsYyyyMmDd();
+  url = data.host + data.path;
+  ws.uuid = data.uuid;
+  ws.url = url;
+  
+  key = `${currentDate}|referrer|${url}|${data.referrer}`;
+  await redisClient.INCRBY(key, 1);
+  console.log(key);
+
+  key = `${currentDate}|timeOnPage|${url}`;
+  await redisClient.INCRBY(key, data.ts);
+  
+  key = `${currentDate}|pageViews|${url}`;
+  await redisClient.INCRBY(key, 1);
+
+  key = `${currentDate}|pageViewers|${url}`;
+  result = await redisClient.SADD(key, data.uuid);
+
+  if (result) {
+    key = `${currentDate}|uniquePageViewers|${url}`;
+    await redisClient.INCRBY(key, 1);      
+  }
+
+  key = `${currentDate}|siteViews|${data.host}`;
+  await redisClient.INCRBY(key, 1);
+
+  key = `${currentDate}|timeOnSite|${data.host}`;
+  await redisClient.INCRBY(key, data.ts);
+
+  key = `${currentDate}|siteViewers|${data.host}`;
+  result = await redisClient.SADD(key, data.uuid);
+
+  if (result) {
+    key = `${currentDate}|uniqueSiteViewers|${data.host}`;
+    await redisClient.INCRBY(key, 1);
+  }
+
+  if (data.isSubscriber) {
+    if (typeof subscriptions[data.uuid] === 'undefined') {
+    
+      subscriptions[data.uuid] = {};
+      subscriptions[data.uuid].urls = new Set();
+      subscriptions[data.uuid].host = data.host;
+      subscriptions[data.uuid].connection = ws;
+    }
+
+    urlSubscribe(data.uuid, url);
+
+    handleSubscriptions();
+  } else console.log(`${data.uuid} is not a subscriber`);
+} 
+
 const processMessage = async (info, ws) => {
   let data = JSON.parse(info);
-  console.log(data);
-
     
   if (typeof data.type === undefined) return;
 
@@ -132,56 +213,7 @@ const processMessage = async (info, ws) => {
       
   switch (data.type) {
     case 'pageVisit':  
-        url = data.host + data.path;
-        ws.uuid = data.uuid;
-        ws.url = url;
-        
-        key = `${currentDate}|referrer|${url}|${data.referrer}`;
-        await redisClient.INCRBY(key, 1);
-
-        key = `${currentDate}|timeOnPage|${url}`;
-        await redisClient.INCRBY(key, data.ts);
-        
-        key = `${currentDate}|pageViews|${url}`;
-        await redisClient.INCRBY(key, 1);
-      
-        key = `${currentDate}|pageViewers|${url}`;
-        result = await redisClient.SADD(key, data.uuid);
-
-        if (result) {
-          key = `${currentDate}|uniquePageViewers|${url}`;
-          await redisClient.INCRBY(key, 1);      
-        }
-
-        key = `${currentDate}|siteViews|${data.host}`;
-        await redisClient.INCRBY(key, 1);
-      
-        key = `${currentDate}|timeOnSite|${data.host}`;
-        await redisClient.INCRBY(key, data.ts);
-      
-        key = `${currentDate}|siteViewers|${data.host}`;
-        result = await redisClient.SADD(key, data.uuid);
-
-        if (result) {
-          key = `${currentDate}|uniqueSiteViewers|${data.host}`;
-          await redisClient.INCRBY(key, 1);
-        }
-
-        if (data.isSubscriber) {
-          if (typeof subscriptions[data.uuid] === 'undefined') {
-          
-            subscriptions[data.uuid] = {};
-            subscriptions[data.uuid].urls = new Set();
-            subscriptions[data.uuid].host = data.host;
-            subscriptions[data.uuid].connection = ws;
-          }
-
-          urlSubscribe(data.uuid, url);
-  
-          handleSubscriptions();
-        } else console.log(`${data.uuid} is not a subscriber`);
-        return;
-      break;
+      return processPageVisit(data, ws);
     case 'pageStay':
         url = data.host + data.path;
 
@@ -194,9 +226,12 @@ const processMessage = async (info, ws) => {
       break;
     case 'urlSubscribe':
         const {host, path, uuid} = data;
-
         urlSubscribe(uuid, host + path);
         break;
+    case 'getReferrers':
+        getReferrers(data.uuid, data.url);
+        break;
+
     default:
         console.error(`unknown type: ${data.type}`)
         return;
